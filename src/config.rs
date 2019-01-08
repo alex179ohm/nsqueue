@@ -1,34 +1,34 @@
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     // Identifiers sent to nsqd representing this client
-    client_id: Option<String>,
-    short_id: Option<String>,
-    long_id: Option<String>,
-    hostname: Option<String>,
-    user_agent: String,
+    pub client_id: Option<String>,
+    pub short_id: Option<String>,
+    pub long_id: Option<String>,
+    pub hostname: Option<String>,
+    pub user_agent: String,
 
     // Compression Settings
-    deflate: bool,
-    deflate_level: u16,
-    snappy: bool,
+    pub deflate: bool,
+    pub deflate_level: u16,
+    pub snappy: bool,
 
-    feature_negotiation: bool,
+    pub feature_negotiation: bool,
 
     // Duration of time between heartbeats.
-    heartbeat_interval: i64,
+    pub heartbeat_interval: i64,
 
     // Timeout used by nsqd before flushing buffered writes (set to 0 to disable).
-    message_timeout: u32,
+    pub message_timeout: u32,
 
     // Size of the buffer (in bytes) used by nsqd for buffering writes to this connection
-    output_buffer_size: u64,
-    output_buffer_timeout: u32,
+    pub output_buffer_size: u64,
+    pub output_buffer_timeout: u32,
 
     // Integer percentage to sample the channel (requires nsqd 0.2.25+)
-    sample_rate: u16,
+    pub sample_rate: u16,
 
     // tls_v1 - Bool enable TLS negotiation
-    tls_v1: bool,
+    pub tls_v1: bool,
 }
 use hostname::get_hostname;
 
