@@ -9,6 +9,7 @@ extern crate tokio_proto;
 extern crate bytes;
 extern crate byteorder;
 extern crate hostname;
+extern crate tokio_codec;
 
 #[macro_use]
 extern crate serde_derive;

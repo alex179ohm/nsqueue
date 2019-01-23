@@ -2,7 +2,7 @@ use std::io;
 use std::io::Cursor;
 use std::iter::Iterator;
 
-use bytes::{Buf, BufMut, BytesMut, BigEndian};
+use bytes::{Buf, BufMut, BytesMut};
 use tokio_io::codec::{Encoder, Decoder};
 use tokio_proto::streaming::pipeline::Frame;
 use tokio_proto::streaming::{Body, Message};
@@ -46,13 +46,13 @@ impl Decoder for NsqCodec {
         }
 
         let mut cursor = Cursor::new(buf.clone());
-        let size: i32 = cursor.get_i32::<BigEndian>();
+        let size: i32 = cursor.get_i32_be();
 
         if length < size as usize {
             return Ok(None);
         }
 
-        let frame_type: i32 = cursor.get_i32::<BigEndian>();
+        let frame_type: i32 = cursor.get_i32_be();
 
         if frame_type == FRAME_TYPE_RESPONSE {
             // remove the serialized frame from the buffer.
@@ -83,8 +83,8 @@ impl Decoder for NsqCodec {
                 // toggle streaming
                 Ok(Some(self.streaming_flag()))
             } else {
-                let timestamp = cursor.get_i64::<BigEndian>(); // timestamp
-                let _ = cursor.get_u16::<BigEndian>(); // attempts
+                let timestamp = cursor.get_i64_be(); // timestamp
+                let _ = cursor.get_u16_be(); // attempts
  
                 let data = str::from_utf8(&cursor.bytes()).unwrap().to_string();
                 let (id, body) = data.split_at(16);
@@ -131,7 +131,7 @@ impl Encoder for NsqCodec {
                 if let Some(body) = message.body {
                     let mut buf_32 = Vec::with_capacity(body.len());
                     let body_len = body.len() as u32;
-                    buf_32.put_u32::<BigEndian>(body_len);
+                    buf_32.put_u32_be(body_len);
                     buf_32.put(&body[..]);
                     buf.extend(buf_32);
                 }
@@ -145,14 +145,14 @@ impl Encoder for NsqCodec {
                     let mut buf_32 = Vec::with_capacity(total_bytes);
                     // [4-byte body size]
                     let body_len = total_bytes as u32;
-                    buf_32.put_u32::<BigEndian>(body_len);
+                    buf_32.put_u32_be(body_len);
                     // [4-byte num messages]
                     let messages_len = body_messages.len() as u32;
-                    buf_32.put_u32::<BigEndian>(messages_len);
+                    buf_32.put_u32_be(messages_len);
                     // [ 4-byte message #1 size ][ N-byte binary data ] ...
                     for message in &body_messages {
                         let message_len = message.len() as u32;
-                        buf_32.put_u32::<BigEndian>(message_len);
+                        buf_32.put_u32_be(message_len);
                         buf_32.put(&message[..]);
                     }
                     buf.extend(buf_32);
