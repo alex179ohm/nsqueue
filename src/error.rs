@@ -9,7 +9,6 @@ use codec;
 pub enum Error {
     /// A Non-Specific internal error than prevented and operation from completing
     Internal(String),
-    IOError(io::Error),
 
     /// An IO error
     IO(io::Error),
@@ -34,7 +33,7 @@ pub fn value<T: Into<String>>(msg: T, val: codec::NSQValue) -> Error {
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Error {
-        Error::IOError(err)
+        Error::IO(err)
     }
 }
 
@@ -44,10 +43,15 @@ impl From<oneshot::Canceled> for Error {
     }
 }
 
+impl<T: 'static + Send> From<mpsc::SendError<T>> for Error {
+    fn from(err: mpsc::SendError<T>) -> Error {
+        Error::Unexpected(format!("Cannot write to channel: {}", err))
+    }
+}
+
 impl error::Error for Error {
     fn description(&self) -> &str {
         match *self {
-            Error::IOError(ref err) => err.description(),
             Error::IO(ref err) => err.description(),
             Error::Value(ref s, _) => s,
             Error::Unexpected(ref s) => s,
@@ -58,7 +62,6 @@ impl error::Error for Error {
 
     fn cause(&self) -> Option<&error::Error> {
         match *self {
-            Error::IOError(ref err) => Some(err),          
             Error::IO(ref err) => Some(err),
             Error::Value(_, _) => None,
             Error::Internal(_) => None,
