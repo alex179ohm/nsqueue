@@ -14,20 +14,23 @@ pub enum Error {
     IO(io::Error),
 
     /// An parsing/serialising error occurred
-    Value(String, Option<codec::NSQValue>),
+    Value(String, Option<codec::NsqValue>),
 
     /// An critical Unexpected Error
     Unexpected(String),
 
     /// End of Stream connection is broken
     EndOfStream,
+
+    /// Remote error
+    Remote(String),
 }
 
 pub fn internal<T: Into<String>>(msg: T) -> Error {
     Error::Internal(msg.into())
 }
 
-pub fn value<T: Into<String>>(msg: T, val: codec::NSQValue) -> Error {
+pub fn value<T: Into<String>>(msg: T, val: codec::NsqValue) -> Error {
     Error::Value(msg.into(), Some(val))
 }
 
@@ -57,6 +60,7 @@ impl error::Error for Error {
             Error::Unexpected(ref s) => s,
             Error::Internal(ref s) => s,
             Error::EndOfStream => "End of Stream",
+            Error::Remote(ref s) => s,
         }
     }
 
@@ -67,6 +71,7 @@ impl error::Error for Error {
             Error::Internal(_) => None,
             Error::Unexpected(_) => None,
             Error::EndOfStream => None,
+            Error::Remote(_) => None,
         }
     }
 }
