@@ -3,14 +3,11 @@
 
 use std::io;
 use std::io::Cursor;
-use std::iter::Iterator;
 use super::error::Error;
 
 use bytes::{Buf, BufMut, BytesMut};
 use tokio_io::codec::{Encoder, Decoder};
 use std::str;
-
-use response::Message as TypeMessage;
 
 // Header: Size(4-Byte) + FrameType(4-Byte)
 const HEADER_LENGTH: usize = 8;
@@ -23,7 +20,7 @@ const FRAME_TYPE_MESSAGE: i32 = 0x02;
 const HEARTBEAT: &'static str = "_heartbeat_";
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum NSQValue {
+pub enum NsqValue {
 
     /// An Error form nsqd,
     Error(String),
@@ -47,10 +44,10 @@ pub enum NSQValue {
     Heartbeat,
 }
 
-impl NSQValue {
-    fn into_result(self) -> Result<NSQValue, Error> {
+impl NsqValue {
+    fn into_result(self) -> Result<NsqValue, Error> {
         match self {
-            NSQValue::Error(err) => Err(Error::Remote(err)),
+            NsqValue::Error(err) => Err(Error::Remote(err)),
             s => Ok(s),
         }
     }
@@ -71,10 +68,7 @@ fn check_and_reserve(buf: &mut BytesMut, size: usize) {
     }
 }
 
-fn write_header(buf: &mut BytesMut, size: i32) {
-    buf.put_i32_be(size);
-}
-
+/// write command in buffer and append 0x2 ("\n")
 fn write_cmd(buf: &mut BytesMut, cmd: String) {
     let cmd_as_bytes = cmd.as_bytes();
     let size = cmd_as_bytes.len() + 1;
@@ -83,43 +77,35 @@ fn write_cmd(buf: &mut BytesMut, cmd: String) {
     write_n(buf);
 }
 
-/// write msg:
+/// write command and msg in buffer.
 /// 
+/// packet format:
 /// <command>\n
 /// [ 4 byte size in bytes as BigEndian i64 ][ N-byte binary data ]
 /// 
-/// command could be PUB or DPUB or any command that send a message too.
-fn write_msg(buf: &mut BytesMut, cmd: String, msg: String) {
-    let cmd_as_bytes = cmd.as_bytes();
+/// https://nsq.io/clients/tcp_protocol_spec.html.
+/// command could be PUB or DPUB or any command witch send a message.
+pub fn write_msg(buf: &mut BytesMut, msg: String) {
     let msg_as_bytes = msg.as_bytes();
     let msg_len = msg_as_bytes.len();
-    let size = cmd_as_bytes.len() + 1 + 4 + msg_len;
+    let size = 4 + msg_len;
     check_and_reserve(buf, size);
-    buf.extend(cmd_as_bytes);
-    write_n(buf);
     buf.put_u32_be(msg_len as u32);
     buf.extend(msg_as_bytes);
 }
 
-fn write_mmsg(buf: &mut BytesMut, cmd: String, msgs: Vec<String>) {
-    let cmd_as_bytes = cmd.as_bytes();
-    let size = cmd_as_bytes.len() + 1;
-    check_and_reserve(buf, size);
-    buf.extend(cmd_as_bytes);
-    write_n(buf);
+/// write multiple messages (aka msub command).
+pub fn write_mmsg(buf: &mut BytesMut, cmd: String, msgs: Vec<String>) {
+    write_cmd(buf, cmd);
+    buf.put_u32_be(msgs.len() as u32);
     for msg in msgs {
-        let msg_as_bytes = msg.as_bytes();
-        let msg_len = msg_as_bytes.len();
-        size = size + 4 + msg_len;
-        check_and_reserve(buf, size);
-        buf.put_u32_be(msg_len as u32);
-        buf.extend(msg_as_bytes);
+        write_msg(buf, msg);
     }
 }
 
 
 impl Decoder for NsqCodec {
-    type Item = NSQValue;
+    type Item = NsqValue;
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -127,8 +113,8 @@ impl Decoder for NsqCodec {
 
         if length < HEADER_LENGTH {
              return Ok(Some(
-                 NSQValue::Error(
-                     "Packet lenght must be equal or greater to HEADER_LENGHT".to_owned()
+                 NsqValue::Error(
+                     "Packet lenght must be equal or greater than HEADER_LENGHT".to_owned()
                      )
              ));
         }
@@ -139,7 +125,7 @@ impl Decoder for NsqCodec {
         if length < size {
             return Ok(
                 Some(
-                    NSQValue::Error(
+                    NsqValue::Error(
                         "Invalid data size".to_owned()
                     )
                 ));
@@ -156,10 +142,10 @@ impl Decoder for NsqCodec {
 
                         // is heartbeat
                         if decoded_message == HEARTBEAT {
-                            Ok(Some(NSQValue::Heartbeat))
+                            Ok(Some(NsqValue::Heartbeat))
                         } else {
                             Ok(Some(
-                                NSQValue::Response(decoded_message)
+                                NsqValue::Response(decoded_message)
                             ))
                         }
                     }
@@ -180,7 +166,7 @@ impl Decoder for NsqCodec {
                 buf.split_to(HEADER_LENGTH + length);
 
                 Ok(Some(
-                    NSQValue::MuxMsg(ts, id.to_owned(), msg.to_owned())
+                    NsqValue::MuxMsg(ts, id.to_owned(), msg.to_owned())
                 ))              
                 },
             _ => {Ok(None)},
@@ -189,18 +175,19 @@ impl Decoder for NsqCodec {
 }
 
 impl Encoder for NsqCodec {
-    type Item = NSQValue;
+    type Item = NsqValue;
     type Error = io::Error;
 
     fn encode(&mut self, msg: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let ret = match msg {
-            NSQValue::Command(cmd) => {
+            NsqValue::Command(cmd) => {
                 write_cmd(buf, cmd)
             },
-            NSQValue::Msg(cmd, msg) => {
-                write_msg(buf, cmd, msg)
+            NsqValue::Msg(cmd, msg) => {
+                write_cmd(buf, cmd);
+                write_msg(buf, msg)
             },
-            NSQValue::MMsg(cmd, msgs) => {
+            NsqValue::MMsg(cmd, msgs) => {
                 write_mmsg(buf, cmd, msgs)
             },
             _ => {},
@@ -208,6 +195,10 @@ impl Encoder for NsqCodec {
         Ok(ret)
     }
 }
+
+
+
+// TODO: implement heartbeat after connection.
 
 //impl NsqCodec {    
 //    fn heartbeat_message(&mut self) -> Frame<String, TypeMessage, io::Error>
