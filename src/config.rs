@@ -32,14 +32,13 @@ pub struct Config {
 }
 use hostname::get_hostname;
 
-#[allow(dead_code)]
-impl Config {
-    pub fn default() -> Config {
+impl Default for Config {
+    fn default() -> Config {
         Config {
             client_id: get_hostname(),
             short_id: get_hostname(),
             long_id: get_hostname(),
-            user_agent: String::from("github.com/wisespace-io/nsqueue"),
+            user_agent: String::from("nsqueue"),
             hostname: get_hostname(),
             deflate: false,
             deflate_level: 6,
@@ -52,6 +51,13 @@ impl Config {
             sample_rate: 0,
             tls_v1: false,
         }
+    }
+}
+
+#[allow(dead_code)]
+impl Config {
+    pub fn new() -> Config {
+        Config{ ..Default::default() }
     }
 
     pub fn client_id(mut self, client_id: String) -> Self {
