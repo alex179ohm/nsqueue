@@ -1,13 +1,13 @@
 //! And implementation of the NSQ protocol,
 //! Source: https://github.com/benashford/redis-async-rs/blob/master/src/resp.rs
 
-use std::io;
-use std::io::Cursor;
+use std::io::{self, Cursor, Error as IOError, ErrorKind};
 use super::error::Error;
 
 use bytes::{Buf, BufMut, BytesMut};
 use tokio_io::codec::{Encoder, Decoder};
 use std::str;
+use std::time::Duration;
 
 // Header: Size(4-Byte) + FrameType(4-Byte)
 const HEADER_LENGTH: usize = 8;
@@ -22,17 +22,14 @@ const HEARTBEAT: &'static str = "_heartbeat_";
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum NsqValue {
 
-    /// An Error form nsqd,
-    Error(String),
-
-    /// An Command that not implement sending msgs.
-    Command(String),
-
-    /// Succefull response from nsqd.
+    /// Succefull response.
     Response(String),
 
-    /// Message from nsqd.
-    MuxMsg(i64, String, String),
+    /// Message response.
+    ResponseMsg(Duration, String, String),
+
+    /// A simple Command whitch not sends msg.
+    Command(String),
 
     /// A simple message (pub or dpub).
     Msg(String, String),
@@ -43,16 +40,6 @@ pub enum NsqValue {
     /// nsqd heartbeat msg.
     Heartbeat,
 }
-
-impl NsqValue {
-    fn into_result(self) -> Result<NsqValue, Error> {
-        match self {
-            NsqValue::Error(err) => Err(Error::Remote(err)),
-            s => Ok(s),
-        }
-    }
-}
-
 
 /// NSQ codec
 pub struct NsqCodec;
@@ -106,29 +93,30 @@ pub fn write_mmsg(buf: &mut BytesMut, cmd: String, msgs: Vec<String>) {
 
 impl Decoder for NsqCodec {
     type Item = NsqValue;
-    type Error = io::Error;
+    type Error = Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let length = buf.len();
 
         if length < HEADER_LENGTH {
-             return Ok(Some(
-                 NsqValue::Error(
-                     "Packet lenght must be equal or greater than HEADER_LENGHT".to_owned()
+             return Err(
+                 Error::IO(
+                     IOError::new(ErrorKind::Other, "Invalid HEADER_LENGHT")
                      )
-             ));
+             );
         }
 
         let mut cursor = Cursor::new(buf.clone());
-        let size: usize = cursor.get_i32_be() as usize;
+        let size = cursor.get_i32_be() as usize;
 
         if length < size {
-            return Ok(
-                Some(
-                    NsqValue::Error(
-                        "Invalid data size".to_owned()
+            println!("lenght: {}, size: {}", length, size);
+            println!("{:#?}", &buf[..]);
+            return Err(
+                    Error::IO(
+                        IOError::new(ErrorKind::Other, "Invalid data size")
                     )
-                ));
+                );
         }
 
         let frame_type: i32 = cursor.get_i32_be();
@@ -149,14 +137,22 @@ impl Decoder for NsqCodec {
                             ))
                         }
                     }
-                    Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid UTF-8")),
+                    Err(_) => Err(Error::Internal("Invalid UTF-8 Data".to_owned())),
                 }
             },
             FRAME_TYPE_ERROR => {
-                Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid packet received"))
+                buf.split_to(HEADER_LENGTH + length);
+                match String::from_utf8(Vec::from(cursor.bytes())) {
+                    Ok(s) => {
+                        Err(Error::Remote(s))
+                    },
+                    Err(_) => {
+                        Err(Error::Internal("Invalid UTF-8".to_owned()))
+                    },   
+                }
             },
             FRAME_TYPE_MESSAGE => {
-                let ts = cursor.get_i64_be(); // timestamp
+                let ts = cursor.get_u64_be(); // timestamp
                 let _ = cursor.get_u16_be(); // attempts
 
                 let data = str::from_utf8(&cursor.bytes()).unwrap().to_string();
@@ -166,9 +162,9 @@ impl Decoder for NsqCodec {
                 buf.split_to(HEADER_LENGTH + length);
 
                 Ok(Some(
-                    NsqValue::MuxMsg(ts, id.to_owned(), msg.to_owned())
+                    NsqValue::ResponseMsg(Duration::from_nanos(ts), id.to_owned(), msg.to_owned())
                 ))              
-                },
+            },
             _ => {Ok(None)},
         }
     }
@@ -195,31 +191,3 @@ impl Encoder for NsqCodec {
         Ok(ret)
     }
 }
-
-
-
-// TODO: implement heartbeat after connection.
-
-//impl NsqCodec {    
-//    fn heartbeat_message(&mut self) -> Frame<String, TypeMessage, io::Error>
-//    {
-//        let message = TypeMessage{
-//            timestamp: 0,
-//            message_id: HEARTBEAT.to_string(),
-//            message_body: HEARTBEAT.to_string()
-//        };
-//
-//        Frame::Body {
-//            chunk: Some(message),
-//        } 
-//    }
-//
-//    fn streaming_flag(&mut self) -> Frame<String, TypeMessage, io::Error>
-//    {
-//        self.decoding_head = false;
-//        Frame::Message {
-//            message: "".into(),
-//            body: true,
-//        }
-//    }
-//}
